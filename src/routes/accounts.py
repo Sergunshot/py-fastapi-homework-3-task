@@ -1,3 +1,4 @@
+import secrets
 from datetime import datetime, timezone
 from typing import cast
 
@@ -33,6 +34,7 @@ from src.schemas.accounts import (
     TokenRefreshResponseSchema,
     TokenRefreshRequestSchema
 )
+from src.security.passwords import hash_password
 
 router = APIRouter()
 
@@ -74,18 +76,15 @@ def activate(activation_data: UserActivationRequestSchema, db: Session = Depends
     token_record = db.query(ActivationTokenModel).join(UserModel).filter(
         UserModel.email == activation_data.email,
         ActivationTokenModel.token == activation_data.token
-    )
-    if (not token_record
+    ).one_or_none()
+    if (token_record is None
             or cast(datetime, token_record.expires_at).replace(tzinfo=timezone.utc) > datetime.now(timezone.utc)):
-        if token_record:
-            db.delete(token_record)
-            db.commit()
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid or expired activation token."
         )
 
-    user = token_record.user
+    user = token_record.UserModel
     if user.is_active:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -109,8 +108,9 @@ def password_reset_request(reset_data: PasswordResetRequestSchema, db: Session =
         return MessageResponseSchema(
             message="If you are registered, you will receive an email with instructions."
         )
-    db.query(PasswordResetTokenModel).filter_by(user_id=user.id).delete()
-    reset_token = PasswordResetTokenModel(token=reset_data.token, user_id=cast(int, user.id))
+    db.query(PasswordResetTokenModel).filter_by(user_id=cast(int, user.id)).one_or_none()
+    generated_token = secrets.token_urlsafe(32)
+    reset_token = PasswordResetTokenModel(token=generated_token, user_id=cast(int, user.id))
     db.add(reset_token)
     db.commit()
     return MessageResponseSchema(
@@ -131,19 +131,18 @@ def reset_password_complete(data: PasswordResetCompleteRequestSchema, db: Sessio
             detail="Invalid email or token."
         )
     token_record = db.query(PasswordResetTokenModel).filter_by(user_id=user.id).first()
-    expired_token = cast(datetime, token_record.expires_at).replace(tzinfo=timezone.utc)
-
-    if not token_record or token_record.token != expired_token or token_record.expires_at < datetime.now(timezone.utc):
-        if token_record:
-            db.delete(token_record)
-            db.commit()
+    if not token_record:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid email or token."
         )
+    expired_token = cast(datetime, token_record.expires_at).replace(tzinfo=timezone.utc)
 
+    if token_record.token != expired_token or token_record.expires_at < datetime.now(timezone.utc):
+        db.delete(token_record)
+        db.commit()
     try:
-        user.password = data.password
+        user.password = hash_password(data.password)
         db.delete(token_record)
         db.commit()
     except SQLAlchemyError:
