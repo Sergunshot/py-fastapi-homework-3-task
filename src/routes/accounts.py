@@ -109,7 +109,7 @@ def password_reset_request(reset_data: PasswordResetRequestSchema, db: Session =
         return MessageResponseSchema(
             message="If you are registered, you will receive an email with instructions."
         )
-    db.query(PasswordResetTokenModel).filter_by(user_id=cast(int, user.id)).one_or_none()
+    db.query(PasswordResetTokenModel).filter_by(user_id=cast(int, user.id)).delete()
     generated_token = secrets.token_urlsafe(32)
     reset_token = PasswordResetTokenModel(token=generated_token, user_id=cast(int, user.id))
     db.add(reset_token)
@@ -139,18 +139,16 @@ def reset_password_complete(data: PasswordResetCompleteRequestSchema, db: Sessio
         )
 
     if token_record.token != data.token or token_record.expires_at < datetime.now(timezone.utc):
-        db.delete(token_record)
-        db.commit()
-    try:
-        user.password = hash_password(data.password)
-        db.delete(token_record)
-        db.commit()
-    except SQLAlchemyError:
-        db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="An error occurred while resetting the password."
-        )
+        try:
+            user.password = hash_password(data.password)
+            db.delete(token_record)
+            db.commit()
+        except SQLAlchemyError:
+            db.rollback()
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="An error occurred while resetting the password."
+            )
 
     return MessageResponseSchema(message="Password reset successfully.")
 
