@@ -50,7 +50,8 @@ def register(user_data: UserRegistrationRequestSchema, db: Session = Depends(get
         )
 
     group = db.query(UserGroupModel).filter(UserGroupModel.name == UserGroupEnum.USER).first()
-    user = UserModel.create(user_data.email, user_data.password, group.id)
+    hashed_password = hash_password(user_data.password)
+    user = UserModel.create(user_data.email, hashed_password, group.id)
 
     try:
         db.add(user)
@@ -136,9 +137,8 @@ def reset_password_complete(data: PasswordResetCompleteRequestSchema, db: Sessio
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Invalid email or token."
         )
-    expired_token = cast(datetime, token_record.expires_at).replace(tzinfo=timezone.utc)
 
-    if token_record.token != expired_token or token_record.expires_at < datetime.now(timezone.utc):
+    if token_record.token != data.token or token_record.expires_at < datetime.now(timezone.utc):
         db.delete(token_record)
         db.commit()
     try:
