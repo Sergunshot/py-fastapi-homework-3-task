@@ -113,8 +113,8 @@ async def activate(
     token_record = result.scalar_one_or_none()
 
     if (
-            token_record is None or
-            cast(datetime, token_record.expires_at).replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
+            token_record is None
+            or cast(datetime, token_record.expires_at).replace(tzinfo=timezone.utc) < datetime.now(timezone.utc)
     ):
         if token_record:
             await db.delete(token_record)
